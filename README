@@ -1,0 +1,45 @@
+
+klogsql is a very simple script and some SQL schema and statements
+(currently targeted at SQLite3).  The script includes a very rudimentary
+log parser.
+
+The one really ugly thing about this is that it's written in ksh.
+
+To run this:
+
+% sqlparse-krb5-log help
+% sqlparse-krb5-log init main.db
+% grep krb5kdc /path/to/log-file | sqlparse-krb5-log load main.db log.db
+% sqlparse-krb5-log attach main.db log.db > attach.sql
+% sqlite3
+SQLite version 3.7.4
+Enter ".help" for instructions
+Enter SQL statements terminated with a ";"
+sqlite> .read attach.sql
+sqlite> select name from sqlite_master where type = 'table'
+   ...> union all
+   ...> select name from sqlite_temp_master where type = 'view';
+client
+sqlite_sequence
+princ
+client_cname_sname
+enctypes
+req_enctypes_lists
+req_enctypes_normal
+log_entry_success
+log_entry_fail
+sqlite> 
+...
+
+Some aggregated information will be in the `client`, `princ`, and
+`client_cname_sname` tables.  The log messages are available in the
+`log_entry_success` and `log_entry_fail` views.
+
+Queries can then be made joining the log views/tables to the analysis
+tables.
+
+Log data can get large, which is why this scheme uses separate databases
+for log messages and for aggregated data.  It is then simple to load a
+few million entries, analyze, delete the log DB, then the next million
+entries, ..., lather, rinse, repeat.
+

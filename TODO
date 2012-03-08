@@ -1,0 +1,9 @@
+
+ - Add a table with {starttime, endtime, averages of various types}
+
+   With such a table we could keep an approximation of running averages
+   and use that for discovering trends.
+
+ - Complete the last_* analysis.
+
+ - Analyze failure messages.
