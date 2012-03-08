@@ -199,11 +199,9 @@ function load_log_entries {
 	    i=1
 	    while ((i < ${#reqenctypes_a[@]} && ${reqenctypes_a[0]} == ${reqenctypes_a[i]})); do
 		unset reqenctypes_a[i]
-		print -u2 Removing ${i}th reqenctype
 		((i++))
 	    done
             reqenctypes="${reqenctypes_a[*]}"
-	    print -u2 "reqenctypes=$reqenctypes, reqenctypes_o=$reqenctypes_o"
             ((${#reqenctypes} == 0)) && printf "Whoops! empty enctypelist at line # %d (%s)\n" $lineno "$rawline" 1>&2
             # request client IP address
             reqip=${j[$((${#j[@]} - 1))]}
@@ -276,6 +274,7 @@ OIFS=$IFS
 set -o noglob
 integer i
 
+## XXX getopt-ify this ugly code so we can have various options
 (($# < 2)) && usage
 cmd=$1
 db=$2
@@ -307,7 +306,7 @@ load)
         printf "SELECT 'Analyzing loaded entries...';\n"
         printf ".read analyze.sql\n"
         printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
-    ) | tee actual_sql | sqlite3 "$db"
+    ) | sqlite3 "$db"
     exit $?
     ;;
 attach)
