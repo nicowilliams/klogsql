@@ -13,6 +13,19 @@ CREATE TABLE IF NOT EXISTS client (
     last_strong_tgs INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS client_avgs (
+    id INTEGER PRIMARY KEY REFERENCES client (id) ON DELETE NO ACTION,
+    starttime INTEGER NOT NULL,
+    endtime INTEGER NOT NULL,
+    nentries INTEGER NOT NULL DEFAULT 0,
+    nsuccess INTEGER NOT NULL DEFAULT 0,
+    nfail INTEGER NOT NULL DEFAULT 0,
+    nweak_as INTEGER NOT NULL DEFAULT 0,
+    nweak_tgs INTEGER NOT NULL DEFAULT 0,
+    nstrong_as INTEGER NOT NULL DEFAULT 0,
+    nstrong_tgs INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS princ (
     -- princ name, princ id, last auth, last fail, ...
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,15 +36,22 @@ CREATE TABLE IF NOT EXISTS princ (
     lc_auth INTEGER NOT NULL DEFAULT 0,
     lc_fail INTEGER NOT NULL DEFAULT 0,
     -- We could have a table with per-{princ, enctype} rows
+    --
+    -- These are regarding the requested enctypes
     lc_req_had_weak INTEGER NOT NULL DEFAULT 0,
     lc_req_had_weakfirst INTEGER NOT NULL DEFAULT 0,
     lc_req_had_strong INTEGER NOT NULL DEFAULT 0,
     lc_req_had_strongonly INTEGER NOT NULL DEFAULT 0,
+    -- These are regarding replies
     lc_req_got_weaksesskey INTEGER NOT NULL DEFAULT 0,
     lc_req_got_weakreply INTEGER NOT NULL DEFAULT 0,
     lc_req_got_strongsesskey INTEGER NOT NULL DEFAULT 0,
     lc_req_got_strongreply INTEGER NOT NULL DEFAULT 0,
+    -- Session and reply keys were strong
     lc_req_got_strong INTEGER NOT NULL DEFAULT 0,
+    -- Ticket stuff
+    --
+    -- Last ticket issued for this princ name as a service
     ls_ticket_issue INTEGER NOT NULL DEFAULT 0,
     ls_ticket_fail INTEGER NOT NULL DEFAULT 0,
     ls_ticket_weaksesskey INTEGER NOT NULL DEFAULT 0,
@@ -39,6 +59,32 @@ CREATE TABLE IF NOT EXISTS princ (
     ls_ticket_strongsesskey INTEGER NOT NULL DEFAULT 0,
     ls_ticket_strongticketkey INTEGER NOT NULL DEFAULT 0,
     ls_ticket_strong INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS princ_avgs (
+    id INTEGER PRIMARY KEY REFERENCES client (princ) ON DELETE NO ACTION,
+    starttime INTEGER NOT NULL,
+    endtime INTEGER NOT NULL,
+    nentries INTEGER NOT NULL,
+    -- for brevity lc == last_client, ls == last_server
+    nauth INTEGER NOT NULL DEFAULT 0,
+    nfail INTEGER NOT NULL DEFAULT 0,
+    nreq_had_weak INTEGER NOT NULL DEFAULT 0,
+    nreq_had_weakfirst INTEGER NOT NULL DEFAULT 0,
+    nreq_had_strong INTEGER NOT NULL DEFAULT 0,
+    nreq_had_strongonly INTEGER NOT NULL DEFAULT 0,
+    nreq_got_weaksesskey INTEGER NOT NULL DEFAULT 0,
+    nreq_got_weakreply INTEGER NOT NULL DEFAULT 0,
+    nreq_got_strongsesskey INTEGER NOT NULL DEFAULT 0,
+    nreq_got_strongreply INTEGER NOT NULL DEFAULT 0,
+    nreq_got_strong INTEGER NOT NULL DEFAULT 0,
+    nticket_issue INTEGER NOT NULL DEFAULT 0,
+    nticket_fail INTEGER NOT NULL DEFAULT 0,
+    nticket_weaksesskey INTEGER NOT NULL DEFAULT 0,
+    nticket_weakticketkey INTEGER NOT NULL DEFAULT 0,
+    nticket_strongsesskey INTEGER NOT NULL DEFAULT 0,
+    nticket_strongticketkey INTEGER NOT NULL DEFAULT 0,
+    nticket_strong INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS client_cname_sname (
@@ -49,6 +95,15 @@ CREATE TABLE IF NOT EXISTS client_cname_sname (
     last_weak_sess_key INTEGER NOT NULL DEFAULT 0,
     last_strong_sess_key INTEGER NOT NULL DEFAULT 0,
     UNIQUE(ip_id, cname_id, sname_id)
+);
+
+CREATE TABLE IF NOT EXISTS css_avgs (
+    id INTEGER PRIMARY KEY REFERENCES client_cname_sname (id) ON DELETE NO ACTION,
+    starttime INTEGER NOT NULL,
+    endtime INTEGER NOT NULL,
+    nentries INTEGER NOT NULL,
+    last_weak_sess_key INTEGER NOT NULL DEFAULT 0,
+    last_strong_sess_key INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE VIEW IF NOT EXISTS ccsv AS
