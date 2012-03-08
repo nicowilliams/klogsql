@@ -1,0 +1,320 @@
+#!/usr/bin/ksh
+
+# This is a dead-simple MIT krb5 log entry parser.  It doesn't handle
+# principal names that have commas, colons, or whitespace embedded.
+# That's probably OK.
+
+PROG=$0
+
+tty=/dev/null
+tty -s && tty=/dev/tty
+
+function usage {
+cat <<EOF
+Usage: $PROG init <main-db>
+       $PROG load <main-db> <log-db> [<logfile>]
+       $PROG attach <main-db> <log-db> [<log-db ...]
+
+        $PROG reads log messages from the KDC from <logfile> or stdin then
+        updates the three named databases.
+
+        The three databases are attached into a single connection.  The
+        <main-db> is used for summary historical data with no more than
+        one row per-principal, one row per-client IP address and up to
+        one row per-{client IP, client principal, server principal}.
+
+        The <log-db> contains actual log entries.  These log entries can
+        be quite numerous, and though they are useful for many reporting
+        queries, they also consumer much storage.  Keeping log entries
+        separate makes it possible to trivially expunge them by simply
+        deleting the <log-db> files.
+
+        The init command initializes the given DBs.  The load command
+        loads log entries into a <log-db>.
+
+        The attach command emits SQL suitable for attaching all the
+        given DBs into one and to present a single view unifying
+        multiple <log-db>s.
+
+EOF
+    exit 1
+}
+
+function load_schema {
+    sqlite3 "$1" < schema_main.sql
+#    sqlite3 "$1" <<EOF
+#EOF
+}
+
+# Utility functions; yes, we use global vars; sue me
+
+function clean_values {
+    # Clean up strings; we want neither single quotes (we don't want SQL
+    # injection vulnerabilities here) nor printf % tokens (same deal).
+    logtime=${logtime//[%\']/}
+    kdc=${kdc//[%\']/}
+    reqtype=${reqtype//[%\']/}
+    cprinc=${cprinc//[%\']/}
+    sprinc=${sprinc//[%\']/}
+    code=${code//[%\']/}
+    reason=${reason//[%\']/}
+
+    # Clean up numbers (only decimal digits pleas)
+    [[ "$reqenctypes" = @([ 0-9]) ]] || reqenctypes=0
+    [[ "$authtime" = @([0-9]) ]] || authtime=0
+    [[ "$repenctype" = @([0-9]) ]] || repenctype=0
+    [[ "$tktenctype" = @([0-9]) ]] || tktenctype=0
+    [[ "$sessenctype" = @([0-9]) ]] || sessenctype=0
+}
+
+function insert_enctypes {
+    # INSERT OR IGNORE goes through the process of allocating an
+    # autoincremented INTEGER PRIMARY KEY (a.k.a., rowid) before
+    # deciding to ignore.  This is bad.  This idiom is faster, better.
+    printf " INSERT INTO req_enctypes_lists (enctype_list, enctype_list_orig)
+  SELECT DISTINCT req_enctypes AS e, req_enctypes_orig AS eo
+  FROM log_entry_success
+  WHERE NOT EXISTS (SELECT id FROM req_enctypes_lists el
+    WHERE el.enctype_list = e AND el.enctype_list_orig = eo);\n"
+    printf " INSERT INTO req_enctypes_lists (enctype_list, enctype_list_orig)
+  SELECT DISTINCT req_enctypes AS e, req_enctypes_orig AS eo
+  FROM log_entry_fail
+  WHERE NOT EXISTS (SELECT id FROM req_enctypes_lists el
+    WHERE el.enctype_list = e AND el.enctype_list_orig = eo);\n"
+}
+
+function insert_success {
+    printf "INSERT INTO logs0.log_entry_success
+  (log_time, kdc, ip, req_type, req_enctypes, req_enctypes_orig,
+   authtime, client_name, server_name,
+   reply_enctype, ticket_enctype, session_enctype)
+  SELECT
+    strftime('%%s', '%s'), '%s', '%s',
+    CASE '%s' WHEN 'AS_REQ' THEN 0 ELSE 1 END, 
+    '%s', '%s', %s, '%s', '%s', %s, %s, %s;\n" \
+        "$logtime" "$kdc" "$reqip" "$reqtype" "$reqenctypes" "$reqenctypes_o" \
+	"$authtime" "$cprinc" "$sprinc" "$repenctype" "$tktenctype" \
+	"$sessenctype"
+}
+
+function insert_failure {
+    printf "INSERT INTO logs0.log_entry_fail
+  (log_time, kdc, ip, req_type,
+   req_enctypes, req_enctypes_orig, code, reason, client_name, server_name)
+  SELECT
+    strftime('%%s', '%s'), '%s', '%s',
+    CASE '%s' WHEN 'AS_REQ' THEN 0 ELSE 1 END,
+    '%s', '%s', '%s', '%s', '%s', '%s';\n" \
+        "$logtime" "$kdc" "$reqip" "$reqtype" "$reqenctypes" "$reqenctypes_o" \
+	"$code" "$reason" "$cprinc" "$sprinc"
+}
+
+function attach {
+    typeset -a args=("$@")
+    integer i=0
+    while ((i < $#)); do
+        printf "ATTACH '%s' as logs%d;\n" "${args[$i]}" "$i"
+        ((i++))
+    done
+    integer i=0
+    printf "CREATE TEMP VIEW log_entry_success AS\n"
+    while ((i < $#)); do
+        printf "  SELECT * FROM logs%d.log_entry_success" "$i"
+        if ((++i < $#)); then
+            printf "\n  UNION ALL\n"
+        else
+            printf ";\n"
+        fi
+    done
+    integer i=0
+    printf "CREATE TEMP VIEW log_entry_fail AS\n"
+    while ((i < $#)); do
+        printf "  SELECT * FROM logs%d.log_entry_fail" "$i"
+        if ((++i < $#)); then
+            printf "\n  UNION ALL\n"
+        else
+            printf ";\n"
+        fi
+    done
+}
+
+function load_log_entries {
+    # This is somewhat gross.  We basically use the shell's split on
+    # $IFS feature to parse kdc log entries.  Note that there are
+    # ambiguiities unless krb5_unparse_name() knows to quote the
+    # separator chars used in log entries (and... it doesn't).  The use
+    # of the shell for parsing these log entries, then, is fine, but it
+    # is rather hacky.
+    #
+    typeset src=${1:-/dev/fd/0}
+    integer lineno=0
+    IFS=
+    printf "BEGIN IMMEDIATE;\n"
+    while read line; do
+        rawline="$line"
+        if ((lineno % 2000 == 0 && lineno > 0)); then
+            ((lineno > 0)) && printf "COMMIT;\n"
+            printf "BEGIN IMMEDIATE;\n"
+        fi
+        ((lineno++))
+        # logtime... is hard to parse, so we cheat some and let sqlite3
+        # parse it
+        IFS=$OIFS
+        f1=${line%% @(krb|old|dmz|afsdmz)5kdc*}
+        line=${line#${f1#*: }*: }
+        kdc=${f1##* }
+        logtime=${f1%% *} 
+        if [[ "$logtime" = *[-+]???? ]]; then
+            logtime=${logtime%??}:00
+        fi
+
+        # Split on :
+        IFS=:
+        set -- $line
+
+        if (($# == 0)); then
+            printf "Error: malformed entry at line # %d\n" $lineno 1>&2
+            continue
+        fi
+
+        # Get the request type, enctype list from the request, and
+        # client IP adress from the second :-separated field
+        #
+        # E.g., split "AS_REQ (4 etypes {1 18 23 16}) 1.2.3.4" on
+        # whitespace, parenthesis, and curly braces, so we get something
+        # like j[0]=AS_REQ, j[1]=4, j[2]=etypes, j[3]1, .., j[7]=1.2.3.4
+        IFS="${OIFS}(){}"
+        set -A j -- $1
+            # request type
+            reqtype=${j[0]}
+            # gather up the request enctypes
+            set -A reqenctypes_a
+            i=3
+	    while ((i < (${#j[@]} - 2) )); do
+                reqenctypes_a[((i - 3))]=${j[$i]}
+                ((i++))
+            done
+            IFS=$OIFS
+            reqenctypes_o="${reqenctypes_a[*]}"
+	    i=1
+	    while ((i < ${#reqenctypes_a[@]} && ${reqenctypes_a[0]} == ${reqenctypes_a[i]})); do
+		unset reqenctypes_a[i]
+		print -u2 Removing ${i}th reqenctype
+		((i++))
+	    done
+            reqenctypes="${reqenctypes_a[*]}"
+	    print -u2 "reqenctypes=$reqenctypes, reqenctypes_o=$reqenctypes_o"
+            ((${#reqenctypes} == 0)) && printf "Whoops! empty enctypelist at line # %d (%s)\n" $lineno "$rawline" 1>&2
+            # request client IP address
+            reqip=${j[$((${#j[@]} - 1))]}
+
+        # Get result code from the third :-separated field
+        code=${2## }
+        if [[ "$code" = ISSUE ]]; then
+            # Get result authtime, ... from the last :-separated field
+            #
+            # I.e., from something like "authtime 1329894121, etypes
+            # {rep=18 tkt=17 ses=1}, client_princname@REALM for
+            # krbtgt/REALM@REALM"
+            #
+            # First split on commas
+            IFS=,
+            set -A j -- $3
+
+            # Then split on each comma-separated field on whitespace and
+            # curly braces
+            IFS="${OIFS}{}"
+                # get authtime
+                set -A k -- ${j[0]}
+                authtime=${k[1]}
+                # get etypes
+                set -A k -- ${j[1]}
+                repenctype=${k[1]#*=}
+                tktenctype=${k[2]#*=}
+                sessenctype=${k[3]#*=}
+                # Get client and server principal names.  We just
+                # re-split everything; it's easier.
+                m=${line#*:*:*,*, *}
+                cprinc=${m// for */}
+                sprinc=${m/#* for /}
+
+            # Finally print SQL INSERT statements; we use global
+            # variables for this -- deal with it.
+            IFS=$OIFS
+            insert_success
+        else
+            # Failure log entry.
+            #
+            # Get client and server principal names, and the reason for the
+            # error.  We just re-split everything; it's easier.
+            m=${line#*:*:*:*:*:*:}
+            reason=${m##*,?( )}
+            m=${m%,*}
+            cprinc=${m// for */}
+            cprinc=${cprinc## }
+            sprinc=${m/#* for /}
+            #
+            # Print the SQL INSERT statements.
+            insert_failure
+        fi
+
+        # Clean up
+        IFS=$OIFS
+        unset j
+        unset k
+        unset reqenctypes_a
+        #printf "." > $tty
+        #((lineno % 80 == 0 && lineno > 0)) && printf '\n' > $tty
+    #printf "\n" > $tty
+
+    done < "$src"
+    printf "COMMIT;\n"
+}
+
+OIFS=$IFS
+
+set -o noglob
+integer i
+
+(($# < 2)) && usage
+cmd=$1
+db=$2
+shift 2
+case "$cmd" in
+init) (($# != 0)) && usage
+    #load_schema "$db"
+    sqlite3 "$db" < schema_main.sql
+    exit $?
+    ;;
+load)
+    (($# < 1)) && usage
+    logdb=$1
+    shift
+    (($# == 0)) && set -- /dev/fd/0
+    sqlite3 "$logdb" < schema_log.sql
+    (
+        attach "$logdb"
+        printf "PRAGMA synchronous = OFF;\n"
+        printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
+        for file in "$@"; do
+            load_log_entries "$1"
+        done
+        printf "BEGIN;\n"
+        insert_enctypes
+        printf "COMMIT;\n"
+        printf "SELECT 'Load complete at ', datetime('now', 'localtime');\n"
+        printf "SELECT 'Starting analysis at ', datetime('now', 'localtime');\n"
+        printf "SELECT 'Analyzing loaded entries...';\n"
+        printf ".read analyze.sql\n"
+        printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
+    ) | tee actual_sql | sqlite3 "$db"
+    exit $?
+    ;;
+attach)
+    (($# < 1)) && usage
+    attach "$@"
+    exit $?
+    ;;
+*) usage;;
+esac
+
