@@ -13,17 +13,20 @@ CREATE TABLE IF NOT EXISTS client (
     last_strong_tgs INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS client_avgs (
-    id INTEGER PRIMARY KEY REFERENCES client (id) ON DELETE NO ACTION,
+CREATE TABLE IF NOT EXISTS client_slice_data (
+    ip TEXT PRIMARY KEY REFERENCES client (ip) ON DELETE NO ACTION,
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL DEFAULT 0,
-    nsuccess INTEGER NOT NULL DEFAULT 0,
-    nfail INTEGER NOT NULL DEFAULT 0,
+    is_success INTEGER NOT NULL,
     nweak_as INTEGER NOT NULL DEFAULT 0,
     nweak_tgs INTEGER NOT NULL DEFAULT 0,
     nstrong_as INTEGER NOT NULL DEFAULT 0,
-    nstrong_tgs INTEGER NOT NULL DEFAULT 0
+    nstrong_tgs INTEGER NOT NULL DEFAULT 0,
+    weak_as_rate REAL,
+    weak_tgs_rate REAL,
+    strong_as_rate REAL,
+    strong_tgs_rate REAL
 );
 
 CREATE TABLE IF NOT EXISTS princ (
@@ -61,8 +64,8 @@ CREATE TABLE IF NOT EXISTS princ (
     ls_ticket_strong INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS princ_avgs (
-    id INTEGER PRIMARY KEY REFERENCES client (princ) ON DELETE NO ACTION,
+CREATE TABLE IF NOT EXISTS princ_slice_data (
+    name TEXT PRIMARY KEY REFERENCES princ (name) ON DELETE NO ACTION,
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL,
@@ -84,7 +87,23 @@ CREATE TABLE IF NOT EXISTS princ_avgs (
     nticket_weakticketkey INTEGER NOT NULL DEFAULT 0,
     nticket_strongsesskey INTEGER NOT NULL DEFAULT 0,
     nticket_strongticketkey INTEGER NOT NULL DEFAULT 0,
-    nticket_strong INTEGER NOT NULL DEFAULT 0
+    nticket_strong INTEGER NOT NULL DEFAULT 0,
+    req_had_weak_rate REAL,
+    req_had_weakfirst_rate REAL,
+    req_had_strong_rate REAL,
+    req_had_strongonly_rate REAL,
+    req_got_weaksesskey_rate REAL,
+    req_got_weakreply_rate REAL,
+    req_got_strongsesskey_rate REAL,
+    req_got_strongreply_rate REAL,
+    req_got_strong_rate REAL,
+    ticket_issue_rate REAL,
+    ticket_fail_rate REAL,
+    ticket_weaksesskey_rate REAL,
+    ticket_weakticketkey_rate REAL,
+    ticket_strongsesskey_rate REAL,
+    ticket_strongticketkey_rate REAL,
+    ticket_strong_rate REAL
 );
 
 CREATE TABLE IF NOT EXISTS client_cname_sname (
@@ -97,13 +116,15 @@ CREATE TABLE IF NOT EXISTS client_cname_sname (
     UNIQUE(ip_id, cname_id, sname_id)
 );
 
-CREATE TABLE IF NOT EXISTS css_avgs (
+CREATE TABLE IF NOT EXISTS css_slice_data (
     id INTEGER PRIMARY KEY REFERENCES client_cname_sname (id) ON DELETE NO ACTION,
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL,
-    last_weak_sess_key INTEGER NOT NULL DEFAULT 0,
-    last_strong_sess_key INTEGER NOT NULL DEFAULT 0
+    nlast_weak_sess_key INTEGER NOT NULL DEFAULT 0,
+    nlast_strong_sess_key INTEGER NOT NULL DEFAULT 0,
+    last_weak_sess_key_rate REAL,
+    last_strong_sess_key_rate REAL
 );
 
 CREATE VIEW IF NOT EXISTS ccsv AS

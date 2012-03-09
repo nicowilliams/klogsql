@@ -306,7 +306,19 @@ load)
         printf "SELECT 'Analyzing loaded entries...';\n"
         printf ".read analyze.sql\n"
         printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
-    ) | sqlite3 "$db"
+    ) |  sqlite3 "$db"
+    (
+        printf "SELECT 'Starting indexing of logs at ', datetime('now', 'localtime');\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_idx ON log_entry_success (log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_idx ON log_entry_fail (log_time);\n"
+        printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
+    ) |  sqlite3 "$logdb"
+    (
+        attach "$logdb"
+        printf "SELECT 'Starting aggregation of data for trend analysis at ', datetime('now', 'localtime');\n"
+        printf ".read aggregate_data.sql\n"
+        printf "SELECT 'Aggregation complete at ', datetime('now', 'localtime');\n"
+    ) |  sqlite3 "$db"
     exit $?
     ;;
 attach)

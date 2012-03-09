@@ -1,7 +1,3 @@
---CREATE TEMP TRIGGER update_stats_success
---AFTER INSERT ON logs0.log_entry_success
---FOR EACH ROW
---BEGIN
 -- Insert client, princ, and {client, cname, sname} rows so we can
 -- keep stats there
 INSERT OR IGNORE INTO client (ip)
@@ -279,7 +275,7 @@ SELECT p.id, -- remember, NULL here is ok
     p.ls_ticket_strongticketkey, p.ls_ticket_strong
 FROM log_entry_fail lf LEFT OUTER JOIN princ p ON lf.client_name = p.name;
 
---
+-- Update the client_cname_sname table
 INSERT OR REPLACE INTO client_cname_sname
 (id, ip_id, cname_id, sname_id, last_weak_sess_key, last_strong_sess_key)
 SELECT ccs.id, -- remember, NULL here is ok
