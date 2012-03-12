@@ -1,3 +1,5 @@
+PRAGMA page_size = 8192;
+
 CREATE TABLE IF NOT EXISTS client (
     -- ip addr and last time each enctype list was seen, maybe more
     -- stats
@@ -14,7 +16,7 @@ CREATE TABLE IF NOT EXISTS client (
 );
 
 CREATE TABLE IF NOT EXISTS client_slice_data (
-    ip TEXT PRIMARY KEY REFERENCES client (ip) ON DELETE NO ACTION,
+    ip TEXT NOT NULL,
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL DEFAULT 0,
@@ -23,11 +25,16 @@ CREATE TABLE IF NOT EXISTS client_slice_data (
     nweak_tgs INTEGER NOT NULL DEFAULT 0,
     nstrong_as INTEGER NOT NULL DEFAULT 0,
     nstrong_tgs INTEGER NOT NULL DEFAULT 0,
+    nmodern_as INTEGER NOT NULL DEFAULT 0,
+    nmodern_tgs INTEGER NOT NULL DEFAULT 0,
     weak_as_rate REAL,
     weak_tgs_rate REAL,
     strong_as_rate REAL,
     strong_tgs_rate REAL
+    modern_as_rate REAL,
+    modern_tgs_rate REAL
 );
+CREATE INDEX IF NOT EXISTS csd ON client_slice_data(ip, starttime);
 
 CREATE TABLE IF NOT EXISTS princ (
     -- princ name, princ id, last auth, last fail, ...
@@ -65,7 +72,7 @@ CREATE TABLE IF NOT EXISTS princ (
 );
 
 CREATE TABLE IF NOT EXISTS princ_slice_data (
-    name TEXT PRIMARY KEY REFERENCES princ (name) ON DELETE NO ACTION,
+    name TEXT NOT NULL,
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL,
@@ -105,6 +112,7 @@ CREATE TABLE IF NOT EXISTS princ_slice_data (
     ticket_strongticketkey_rate REAL,
     ticket_strong_rate REAL
 );
+CREATE INDEX IF NOT EXISTS psd ON princ_slice_data(name, starttime);
 
 CREATE TABLE IF NOT EXISTS client_cname_sname (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,8 +124,8 @@ CREATE TABLE IF NOT EXISTS client_cname_sname (
     UNIQUE(ip_id, cname_id, sname_id)
 );
 
-CREATE TABLE IF NOT EXISTS css_slice_data (
-    id INTEGER PRIMARY KEY REFERENCES client_cname_sname (id) ON DELETE NO ACTION,
+CREATE TABLE IF NOT EXISTS ccs_slice_data (
+    id INTEGER NOT NULL,
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL,
@@ -126,6 +134,7 @@ CREATE TABLE IF NOT EXISTS css_slice_data (
     last_weak_sess_key_rate REAL,
     last_strong_sess_key_rate REAL
 );
+CREATE INDEX IF NOT EXISTS ccs ON ccs_slice_data(id, starttime);
 
 CREATE VIEW IF NOT EXISTS ccsv AS
 SELECT c.ip, cn.name, sn.name, ccs.last_weak_sess_key, ccs.last_strong_sess_key

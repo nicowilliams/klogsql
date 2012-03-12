@@ -1,4 +1,4 @@
-#!/usr/bin/ksh
+#!/ms/dist/fsf/PROJ/ksh/93u/bin/ksh
 
 # This is a dead-simple MIT krb5 log entry parser.  It doesn't handle
 # principal names that have commas, colons, or whitespace embedded.
@@ -119,7 +119,7 @@ function attach {
     integer i=0
     printf "CREATE TEMP VIEW log_entry_success AS\n"
     while ((i < $#)); do
-        printf "  SELECT * FROM logs%d.log_entry_success" "$i"
+        printf "  SELECT rowid, * FROM logs%d.log_entry_success" "$i"
         if ((++i < $#)); then
             printf "\n  UNION ALL\n"
         else
@@ -197,7 +197,7 @@ function load_log_entries {
             IFS=$OIFS
             reqenctypes_o="${reqenctypes_a[*]}"
 	    i=1
-	    while ((i < ${#reqenctypes_a[@]} && ${reqenctypes_a[0]} == ${reqenctypes_a[i]})); do
+	    while ((i < ${#reqenctypes_a[@]} && ${reqenctypes_a[0]} == ${reqenctypes_a[i]:-0})); do
 		unset reqenctypes_a[i]
 		((i++))
 	    done
@@ -309,12 +309,14 @@ load)
     ) |  sqlite3 "$db"
     (
         printf "SELECT 'Starting indexing of logs at ', datetime('now', 'localtime');\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_idx ON log_entry_success (log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_idx ON log_entry_fail (log_time);\n"
+	printf "PRAGMA synchronous = off;\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_idx ON log_entry_success (log_time, ip);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_idx ON log_entry_fail (log_time, ip);\n"
         printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$logdb"
     (
         attach "$logdb"
+	printf "PRAGMA synchronous = off;\n"
         printf "SELECT 'Starting aggregation of data for trend analysis at ', datetime('now', 'localtime');\n"
         printf ".read aggregate_data.sql\n"
         printf "SELECT 'Aggregation complete at ', datetime('now', 'localtime');\n"

@@ -1,3 +1,5 @@
+PRAGMA page_size = 8192;
+
 CREATE TABLE IF NOT EXISTS log_entry_success (
     -- normalized log entry
     log_time INTEGER NOT NULL,
