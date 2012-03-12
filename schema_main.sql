@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS client_slice_data (
     weak_as_rate REAL,
     weak_tgs_rate REAL,
     strong_as_rate REAL,
-    strong_tgs_rate REAL
+    strong_tgs_rate REAL,
     modern_as_rate REAL,
     modern_tgs_rate REAL
 );
