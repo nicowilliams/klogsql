@@ -5,7 +5,6 @@
 -- We use a temp table to speed things up
 CREATE TEMP TABLE IF NOT EXISTS tcsd AS SELECT * FROM client_slice_data LIMIT 0;
 DELETE FROM tcsd;
-SELECT 'Starting aggregation of log data into client_slice_data at ' || datetime('now');
 INSERT OR REPLACE INTO tcsd
 (ip, starttime, endtime, nentries, is_success, nweak_as, nweak_tgs, nstrong_as,
 nstrong_tgs, nmodern_as, nmodern_tgs)
@@ -24,7 +23,6 @@ JOIN req_enctypes_lists el ON ls.req_enctypes = el.enctype_list
 GROUP BY ls.ip, (ls.log_time / 21600) * 21600;
 --
 -- Merge the temp table into the main one and compute averages
-SELECT '... ' || datetime('now');
 INSERT OR REPLACE INTO client_slice_data
 (ip, starttime, endtime, nentries, is_success, nweak_as, nweak_tgs, nstrong_as,
 nstrong_tgs, nmodern_as, nmodern_tgs, weak_as_rate, weak_tgs_rate,
@@ -44,12 +42,10 @@ SELECT tcsd.ip,
     tcsd.nweak_tgs + coalesce(csd.nweak_as, 0) / tcsd.nentries + coalesce(csd.nentries, 0),
     tcsd.nstrong_as + coalesce(csd.nweak_as, 0) / tcsd.nentries + coalesce(csd.nentries, 0),
     tcsd.nstrong_tgs + coalesce(csd.nweak_as, 0) / tcsd.nentries + coalesce(csd.nentries, 0),
-    tcsd.nmodern_as + coalesce(csd.modern_as, 0) / tcsd.nentries + coalesce(csd.nentries, 0),
-    tcsd.nmodern_tgs + coalesce(csd.modern_tgs, 0) / tcsd.nentries + coalesce(csd.nentries, 0)
+    tcsd.nmodern_as + coalesce(csd.nmodern_as, 0) / tcsd.nentries + coalesce(csd.nentries, 0),
+    tcsd.nmodern_tgs + coalesce(csd.nmodern_tgs, 0) / tcsd.nentries + coalesce(csd.nentries, 0)
 FROM tcsd tcsd
 LEFT OUTER JOIN client_slice_data csd USING (ip, starttime, is_success);
-SELECT 'Done aggregating data into client_slice_data at ' || datetime('now');
-
 
 -- Aggregate log data in relation to the `client` table into smaller
 -- (size-wise) slices
