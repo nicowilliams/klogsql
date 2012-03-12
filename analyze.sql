@@ -40,35 +40,13 @@ SELECT c.id, -- Because this is a left outer join the can be null, in which case
     ls.ip,
     max(coalesce(c.last_success, 0), ls.log_time),
     c.last_fail,
-    max(coalesce(c.last_weak_as, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT en.enctype_num
-               FROM req_enctypes_normal en
-               JOIN enctypes e ON en.enctype_num = e.enctype
-               WHERE en.list_id = ls.req_enctypes AND e.is_weak) AND
-                   NOT ls.req_type THEN ls.log_time ELSE 0 END)),
-    max(coalesce(c.last_weak_as, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT en.enctype_num
-               FROM req_enctypes_normal en
-               JOIN enctypes e ON en.enctype_num = e.enctype
-               WHERE en.list_id = ls.req_enctypes AND e.is_weak) AND
-                   ls.req_type THEN ls.log_time ELSE 0 END)),
-    max(coalesce(c.last_strong_as, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT en.enctype_num
-               FROM req_enctypes_normal en
-               JOIN enctypes e ON en.enctype_num = e.enctype
-               WHERE en.list_id = ls.req_enctypes AND NOT e.is_weak) AND
-                   NOT ls.req_type THEN ls.log_time ELSE 0 END)),
-    max(coalesce(c.last_strong_tgs, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT en.enctype_num
-               FROM req_enctypes_normal en
-               JOIN enctypes e ON en.enctype_num = e.enctype
-               WHERE en.list_id = ls.req_enctypes AND NOT e.is_weak) AND
-                   ls.req_type THEN ls.log_time ELSE 0 END))
-FROM log_entry_success ls LEFT OUTER JOIN client c ON ls.ip = c.ip;
+    max(coalesce(c.last_weak_as, 0), (CASE WHEN NOT ls.req_type AND el.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(c.last_weak_tgs, 0), (CASE WHEN ls.req_type AND el.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(c.last_strong_as, 0), (CASE WHEN NOT ls.req_type AND NOT el.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(c.last_strong_tgs, 0), (CASE WHEN ls.req_type AND NOT el.is_weak THEN ls.log_time ELSE 0 END))
+FROM log_entry_success ls
+JOIN req_enctypes_lists el ON ls.req_enctypes = el.enctype_list
+LEFT OUTER JOIN client c ON ls.ip = c.ip;
 
 -- Now update the princ table row for the client name in each success log entry
 INSERT OR REPLACE INTO princ
@@ -84,57 +62,24 @@ SELECT p.id, -- remember, NULL here is ok
     max(coalesce(p.lc_auth, 0), ls.log_time, coalesce(p.ls_ticket_issue, 0)),
     max(coalesce(p.lc_auth, 0), ls.authtime),
     p.lc_fail,
-    max(coalesce(p.lc_req_had_weak, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = ls.req_enctypes AND el.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_had_weakfirst, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = ls.req_enctypes AND el.is_too_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_had_strong, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = ls.req_enctypes AND NOT el.modern_client) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_had_strongonly, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = ls.req_enctypes AND NOT el.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_got_weaksesskey, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.session_enctype AND e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_got_weakreply, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.reply_enctype AND e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_got_strongsesskey, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.session_enctype AND NOT e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_got_strongreply, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.reply_enctype AND NOT e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_got_strong, 0), (
-            SELECT CASE WHEN EXISTS (
-                SELECT e.enctype
-                FROM enctypes e, enctypes e2
-                WHERE e.enctype = ls.reply_enctype AND NOT e.is_weak AND
-                    e2.enctype = ls.session_enctype AND NOT e2.is_weak) THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_weak, 0), (CASE WHEN el.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_weakfirst, 0), (CASE WHEN el.is_too_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_strong, 0), (CASE WHEN NOT el.modern_client THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_strongonly, 0), (CASE WHEN NOT el.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_got_weaksesskey, 0), (CASE WHEN se.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_got_weakreply, 0), (CASE WHEN re.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_got_strongsesskey, 0), (CASE WHEN NOT se.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_got_strongreply, 0), (CASE WHEN NOT re.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_got_strong, 0), (CASE WHEN NOT se.is_weak AND NOT se.is_weak THEN ls.log_time ELSE 0 END)),
     -- Leave these alone; we set them in a JOIN on ls.server_name
     p.ls_ticket_issue, p.ls_ticket_fail, p.ls_ticket_weaksesskey,
     p.ls_ticket_weakticketkey, p.ls_ticket_strongsesskey,
     p.ls_ticket_strongticketkey, p.ls_ticket_strong
-FROM log_entry_success ls LEFT OUTER JOIN princ p ON ls.client_name = p.name;
+FROM log_entry_success ls
+LEFT OUTER JOIN princ p ON ls.client_name = p.name
+JOIN enctypes re ON ls.reply_enctype = re.enctype
+JOIN enctypes se ON ls.session_enctype = re.enctype
+JOIN req_enctypes_lists el ON ls.req_enctypes = el.enctype_list;
 
 -- Now update the princ table row for the server name in each success log entry
 INSERT OR REPLACE INTO princ
@@ -151,47 +96,27 @@ SELECT p.id, -- remember, NULL here is ok
     max(coalesce(p.lc_auth, 0), ls.authtime),
     p.lc_fail,
     -- Leave these alone; we set them in a JOIN on ls.client_name
-    lc_req_had_weak, lc_req_had_weakfirst, lc_req_had_strong,
-    lc_req_had_strongonly, lc_req_got_weaksesskey, lc_req_got_weakreply,
-    lc_req_got_strongsesskey, lc_req_got_strongreply, lc_req_got_strong,
+    p.lc_req_had_weak, p.lc_req_had_weakfirst, p.lc_req_had_strong,
+    p.lc_req_had_strongonly, p.lc_req_got_weaksesskey, p.lc_req_got_weakreply,
+    p.lc_req_got_strongsesskey, p.lc_req_got_strongreply, p.lc_req_got_strong,
     max(coalesce(p.ls_ticket_issue, 0), ls.log_time),
     p.ls_ticket_fail,
-    max(coalesce(p.ls_ticket_weaksesskey, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.session_enctype AND e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.ls_ticket_weakticketkey, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.ticket_enctype AND e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.ls_ticket_strongsesskey, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.session_enctype AND NOT e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.ls_ticket_strongticketkey, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e
-               WHERE e.enctype = ls.ticket_enctype AND NOT e.is_weak) THEN ls.log_time ELSE 0 END)),
-    max(coalesce(p.ls_ticket_strong, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT e.enctype
-               FROM enctypes e, enctypes e2
-               WHERE e.enctype = ls.ticket_enctype AND NOT e.is_weak AND
-                   e2.enctype = ls.session_enctype AND NOT e2.is_weak) THEN ls.log_time ELSE 0 END))
-FROM log_entry_success ls LEFT OUTER JOIN princ p ON ls.server_name = p.name;
+    max(coalesce(p.ls_ticket_weaksesskey, 0), (CASE WHEN se.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.ls_ticket_weakticketkey, 0), (CASE WHEN te.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.ls_ticket_strongsesskey, 0), (CASE WHEN NOT se.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.ls_ticket_strongticketkey, 0), (CASE WHEN NOT te.is_weak THEN ls.log_time ELSE 0 END)),
+    max(coalesce(p.ls_ticket_strong, 0), (CASE WHEN NOT se.is_weak AND NOT te.is_weak THEN ls.log_time ELSE 0 END))
+FROM log_entry_success ls
+LEFT OUTER JOIN princ p ON ls.server_name = p.name
+JOIN enctypes se ON ls.session_enctype = se.enctype
+JOIN enctypes te ON ls.ticket_enctype = te.enctype;
 --
 INSERT OR REPLACE INTO client_cname_sname
 (id, ip_id, cname_id, sname_id, last_weak_sess_key, last_strong_sess_key)
 SELECT ccs.id, -- remember, NULL here is ok
     c.id, cn.id, sn.id,
-    max(coalesce(ccs.last_weak_sess_key, 0),
-       CASE WHEN e.is_weak THEN ls.log_time ELSE 0 END),
-    max(coalesce(ccs.last_strong_sess_key, 0),
-       CASE WHEN NOT e.is_weak THEN ls.log_time ELSE 0 END)
+    max(coalesce(ccs.last_weak_sess_key, 0), CASE WHEN e.is_weak THEN ls.log_time ELSE 0 END),
+    max(coalesce(ccs.last_strong_sess_key, 0), CASE WHEN NOT e.is_weak THEN ls.log_time ELSE 0 END)
        -- XXX Add more analysis!
 FROM log_entry_success ls
 INNER JOIN client c ON ls.ip = c.ip
@@ -216,26 +141,10 @@ SELECT p.id, -- remember, NULL here is ok
     p.lc_auth,
     p.lc_auth,
     lf.log_time,
-    max(coalesce(p.lc_req_had_weak, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = lf.req_enctypes AND el.is_weak) THEN lf.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_had_weakfirst, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = lf.req_enctypes AND el.is_too_weak) THEN lf.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_had_strong, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = lf.req_enctypes AND NOT el.modern_client) THEN lf.log_time ELSE 0 END)),
-    max(coalesce(p.lc_req_had_strongonly, 0), (
-           SELECT CASE WHEN EXISTS (
-               SELECT el.id
-               FROM req_enctypes_lists el
-               WHERE el.id = lf.req_enctypes AND NOT el.is_weak) THEN lf.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_weak, 0), (CASE WHEN el.is_weak THEN lf.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_weakfirst, 0), (CASE WHEN el.is_too_weak THEN lf.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_strong, 0), (CASE WHEN el.modern_client THEN lf.log_time ELSE 0 END)),
+    max(coalesce(p.lc_req_had_strongonly, 0), (CASE WHEN NOT el.is_weak THEN lf.log_time ELSE 0 END)),
     -- This being a failure, we can't update these
     p.lc_req_got_weaksesskey,
     p.lc_req_got_weakreply,
@@ -245,7 +154,9 @@ SELECT p.id, -- remember, NULL here is ok
     p.ls_ticket_issue, p.ls_ticket_fail, p.ls_ticket_weaksesskey,
     p.ls_ticket_weakticketkey, p.ls_ticket_strongsesskey,
     p.ls_ticket_strongticketkey, p.ls_ticket_strong
-FROM log_entry_fail lf LEFT OUTER JOIN princ p ON lf.client_name = p.name;
+FROM log_entry_fail lf
+LEFT OUTER JOIN princ p ON lf.client_name = p.name
+JOIN req_enctypes_lists el ON lf.req_enctypes = el.enctype_list;
 
 -- Now update the princ table row for the server name in each fail log entry
 INSERT OR REPLACE INTO princ
@@ -280,10 +191,8 @@ INSERT OR REPLACE INTO client_cname_sname
 (id, ip_id, cname_id, sname_id, last_weak_sess_key, last_strong_sess_key)
 SELECT ccs.id, -- remember, NULL here is ok
     c.id, cn.id, sn.id,
-    max(coalesce(ccs.last_weak_sess_key, 0),
-       CASE WHEN e.is_weak THEN ls.log_time ELSE 0 END),
-    max(coalesce(ccs.last_strong_sess_key, 0),
-       CASE WHEN NOT e.is_weak THEN ls.log_time ELSE 0 END)
+    max(coalesce(ccs.last_weak_sess_key, 0), CASE WHEN e.is_weak THEN ls.log_time ELSE 0 END),
+    max(coalesce(ccs.last_strong_sess_key, 0), CASE WHEN NOT e.is_weak THEN ls.log_time ELSE 0 END)
        -- XXX Add more analysis!
 FROM log_entry_success ls
 INNER JOIN client c ON ls.ip = c.ip
