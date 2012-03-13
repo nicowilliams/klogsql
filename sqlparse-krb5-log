@@ -302,18 +302,25 @@ load)
         insert_enctypes
         printf "COMMIT;\n"
         printf "SELECT 'Load complete at ', datetime('now', 'localtime');\n"
+    ) |  sqlite3 "$db"
+    (
+        printf "SELECT 'Starting indexing of logs at ', datetime('now', 'localtime');\n"
+	printf "PRAGMA synchronous = off;\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ip ON log_entry_success (ip, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_ip ON log_entry_fail (ip, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_cn ON log_entry_success (client_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_cn ON log_entry_fail (client_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_sn ON log_entry_success (server_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_sn ON log_entry_fail (server_name, log_time);\n"
+        printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
+    ) |  sqlite3 "$logdb"
+    (
+        attach "$logdb"
         printf "SELECT 'Starting analysis at ', datetime('now', 'localtime');\n"
         printf "SELECT 'Analyzing loaded entries...';\n"
         printf ".read analyze.sql\n"
         printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$db"
-    (
-        printf "SELECT 'Starting indexing of logs at ', datetime('now', 'localtime');\n"
-	printf "PRAGMA synchronous = off;\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_idx ON log_entry_success (log_time, ip);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_idx ON log_entry_fail (log_time, ip);\n"
-        printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
-    ) |  sqlite3 "$logdb"
     (
         attach "$logdb"
 	printf "PRAGMA synchronous = off;\n"
