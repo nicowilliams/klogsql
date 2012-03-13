@@ -15,12 +15,12 @@
 --FROM log_entry_success ls
 --WHERE NOT EXISTS (SELECT p.name FROM princ p WHERE p.name = ls.server_name);
 --
---INSERT OR IGNORE INTO client_cname_sname (ip_id, cname_id, sname_id)
---SELECT DISTINCT (
-    --SELECT c.id FROM client c WHERE c.ip = ls.ip), (
-    --SELECT p.id FROM princ p WHERE p.name = ls.client_name), (
-    --SELECT p.id FROM princ p WHERE p.name = ls.server_name)
---FROM log_entry_success ls;
+INSERT OR IGNORE INTO client_cname_sname (ip_id, cname_id, sname_id)
+SELECT DISTINCT (
+    SELECT c.id FROM client c WHERE c.ip = ls.ip), (
+    SELECT p.id FROM princ p WHERE p.name = ls.client_name), (
+    SELECT p.id FROM princ p WHERE p.name = ls.server_name)
+FROM log_entry_success ls;
 
 -- Update stats
 --
