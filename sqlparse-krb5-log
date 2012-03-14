@@ -312,6 +312,10 @@ load)
 	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_cn ON log_entry_fail (client_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_sn ON log_entry_success (server_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_sn ON log_entry_fail (server_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipcn ON log_entry_success (ip, authtime, client_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_ipcn ON log_entry_fail (ip, authtime, client_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipsn ON log_entry_success (ip, authtime, server_name, log_time);\n"
+	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_ipsn ON log_entry_fail (ip, authtime, server_name, log_time);\n"
         printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$logdb"
     (

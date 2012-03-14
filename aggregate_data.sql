@@ -126,3 +126,15 @@ SELECT tpsd.name,
     tpsd.ticket_strong_rate + coalesce(psd.ticket_strong_rate, 0) / tpsd.nentries + coalesce(psd.nentries, 0)
 FROM tpsd tpsd
 LEFT OUTER JOIN princ_slice_data psd USING (name, starttime);
+
+-- Heurisitcally detect services to which clients forward credentials
+INSERT OR REPLACE INTO fwdtgts
+SELECT ls.ip, ls.authtime, ls.client_name, ls.server_name, ls2.server_name,
+	ls2.log_time - ls.log_time
+FROM log_entry_success ls
+JOIN log_entry_success ls2 USING (ip, authtime, client_name)
+WHERE ls.req_type AND ls2.req_type AND
+    (ls2.log_time - ls.log_time) BETWEEN 0 AND 900 AND
+    ls2.server_name LIKE 'krbtgt%' AND ls2.req_enctypes != ls.req_enctypes AND
+    ls2.server_name != ls.server_name;
+

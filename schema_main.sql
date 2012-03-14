@@ -141,6 +141,20 @@ SELECT c.ip, cn.name, sn.name, ccs.last_weak_sess_key, ccs.last_strong_sess_key
 FROM client c, princ cn, princ sn, client_cname_sname ccs
 WHERE c.id = ccs.ip_id AND cn.id = ccs.cname_id AND sn.id = ccs.sname_id;
 
+-- This table is used to do an INSERT OR IGNORE INTO of rows from a self-join
+-- on the log tables to heuristically detect hosts to which we're forwarding
+-- credentials.
+CREATE TABLE fwdtgts(
+	ip TEXT NOT NULL,
+	authtime INTEGER NOT NULL,
+	client_name TEXT NOT NULL,
+	server_name TEXT NOT NULL,
+	krbtgt_name TEXT NOT NULL,
+	log_time_diff INTEGER NOT NULL,
+	UNIQUE(ip, authtime, client_name, server_name, krbtgt_name)
+);
+
+
 CREATE TABLE IF NOT EXISTS enctypes (
     enctype INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
