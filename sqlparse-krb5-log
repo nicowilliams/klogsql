@@ -6,7 +6,7 @@
 
 PROG=$0
 
-tty=/dev/null
+tty=/dev/tty
 tty -s && tty=/dev/tty
 
 function usage {
@@ -152,11 +152,13 @@ function load_log_entries {
     printf "BEGIN IMMEDIATE;\n"
     while read line; do
         rawline="$line"
-        if ((lineno % 2000 == 0 && lineno > 0)); then
-            ((lineno > 0)) && printf "COMMIT;\n"
+        ((lineno++))
+	((lineno % 25 == 0)) && printf "." 1>$tty
+        if ((lineno % 2000 == 0)); then
+	    printf "\nAt line number %d\n" $lineno 1>$tty
+            printf "COMMIT;\n"
             printf "BEGIN IMMEDIATE;\n"
         fi
-        ((lineno++))
         # logtime... is hard to parse, so we cheat some and let sqlite3
         # parse it
         IFS=$OIFS
@@ -197,7 +199,7 @@ function load_log_entries {
             IFS=$OIFS
             reqenctypes_o="${reqenctypes_a[*]}"
 	    i=1
-	    while ((i < ${#reqenctypes_a[@]} && ${reqenctypes_a[0]} == ${reqenctypes_a[i]:-0})); do
+	    while ((i < ${#reqenctypes_a[@]} && ${reqenctypes_a[0]:-1111} == ${reqenctypes_a[i]:-0})); do
 		unset reqenctypes_a[i]
 		((i++))
 	    done
@@ -296,7 +298,7 @@ load)
         printf "PRAGMA synchronous = OFF;\n"
         printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
         for file in "$@"; do
-            load_log_entries "$1"
+            grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries
         done
         printf "BEGIN;\n"
         insert_enctypes
@@ -313,9 +315,7 @@ load)
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_sn ON log_entry_success (server_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_sn ON log_entry_fail (server_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipcn ON log_entry_success (ip, authtime, client_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_ipcn ON log_entry_fail (ip, authtime, client_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipsn ON log_entry_success (ip, authtime, server_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_ipsn ON log_entry_fail (ip, authtime, server_name, log_time);\n"
         printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$logdb"
     (
