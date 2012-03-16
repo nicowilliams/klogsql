@@ -1,27 +1,3 @@
--- Insert client, princ, and {client, cname, sname} rows so we can
--- keep stats there
---INSERT OR IGNORE INTO client (ip)
---SELECT ls.ip
---FROM log_entry_success ls
---WHERE NOT EXISTS (SELECT c.ip FROM client c WHERE c.ip = ls.ip);
---
---INSERT OR IGNORE INTO princ (name)
---SELECT ls.client_name
---FROM log_entry_success ls
---WHERE NOT EXISTS (SELECT p.name FROM princ p WHERE p.name = ls.client_name);
---
---INSERT OR IGNORE INTO princ (name)
---SELECT ls.server_name
---FROM log_entry_success ls
---WHERE NOT EXISTS (SELECT p.name FROM princ p WHERE p.name = ls.server_name);
---
-INSERT OR IGNORE INTO client_cname_sname (ip_id, cname_id, sname_id)
-SELECT DISTINCT (
-    SELECT c.id FROM client c WHERE c.ip = ls.ip), (
-    SELECT p.id FROM princ p WHERE p.name = ls.client_name), (
-    SELECT p.id FROM princ p WHERE p.name = ls.server_name)
-FROM log_entry_success ls;
-
 -- Update stats
 --
 -- Use INSERT OR REPLACE INTO ... SELECT ... <left outer join>; to make up for
@@ -114,22 +90,6 @@ LEFT OUTER JOIN princ p ON ls.server_name = p.name
 JOIN enctypes se ON ls.session_enctype = se.enctype
 JOIN enctypes te ON ls.ticket_enctype = te.enctype
 GROUP BY ls.server_name;
---
-INSERT OR REPLACE INTO client_cname_sname
-(id, ip_id, cname_id, sname_id, last_weak_sess_key, last_strong_sess_key)
-SELECT ccs.id, -- remember, NULL here is ok
-    c.id, cn.id, sn.id,
-    max(coalesce(ccs.last_weak_sess_key, 0), max(CASE WHEN e.is_weak THEN ls.log_time ELSE 0 END)),
-    max(coalesce(ccs.last_strong_sess_key, 0), max(CASE WHEN NOT e.is_weak THEN ls.log_time ELSE 0 END))
-       -- XXX Add more analysis!
-FROM log_entry_success ls
-INNER JOIN client c ON ls.ip = c.ip
-INNER JOIN princ cn ON ls.client_name = cn.name
-INNER JOIN princ sn ON ls.server_name = sn.name
-INNER JOIN enctypes e ON ls.session_enctype = e.enctype
-LEFT OUTER JOIN client_cname_sname ccs
-WHERE ccs.ip_id = c.id AND ccs.cname_id = cn.id AND ccs.sname_id = sn.id
-GROUP BY ls.ip, ls.client_name, ls.server_name;
 
 
 -- Now update the princ table row for the client name in each fail log entry
@@ -193,20 +153,15 @@ SELECT p.id, -- remember, NULL here is ok
 FROM log_entry_fail lf LEFT OUTER JOIN princ p ON lf.client_name = p.name
 GROUP BY lf.client_name;;
 
--- Update the client_cname_sname table
+--
 INSERT OR REPLACE INTO client_cname_sname
-(id, ip_id, cname_id, sname_id, last_weak_sess_key, last_strong_sess_key)
-SELECT ccs.id, -- remember, NULL here is ok
-    c.id, cn.id, sn.id,
+(ip, cname, sname, last_weak_sess_key, last_strong_sess_key)
+SELECT 
+    ls.ip, ls.client_name, ls.server_name,
     max(coalesce(ccs.last_weak_sess_key, 0), max(CASE WHEN e.is_weak THEN ls.log_time ELSE 0 END)),
     max(coalesce(ccs.last_strong_sess_key, 0), max(CASE WHEN NOT e.is_weak THEN ls.log_time ELSE 0 END))
        -- XXX Add more analysis!
 FROM log_entry_success ls
-INNER JOIN client c ON ls.ip = c.ip
-INNER JOIN princ cn ON ls.client_name = cn.name
-INNER JOIN princ sn ON ls.server_name = sn.name
 INNER JOIN enctypes e ON ls.session_enctype = e.enctype
-LEFT OUTER JOIN client_cname_sname ccs
-WHERE ccs.ip_id = c.id AND ccs.cname_id = cn.id AND ccs.sname_id = sn.id
+LEFT OUTER JOIN client_cname_sname ccs ON ls.ip = ccs.ip AND ls.client_name = ccs.cname AND ls.server_name = ccs.sname
 GROUP BY ls.ip, ls.client_name, ls.server_name;
-

@@ -115,17 +115,18 @@ CREATE TABLE IF NOT EXISTS princ_slice_data (
 CREATE INDEX IF NOT EXISTS psd ON princ_slice_data(name, starttime);
 
 CREATE TABLE IF NOT EXISTS client_cname_sname (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ip_id INTEGER NOT NULL REFERENCES client (id),
-    cname_id INTEGER NOT NULL REFERENCES princ (id),
-    sname_id INTEGER NOT NULL REFERENCES princ (id),
+    ip TEXT NOT NULL REFERENCES client (ip),
+    cname TEXT NOT NULL REFERENCES princ (name),
+    sname TEXT NOT NULL REFERENCES princ (name),
     last_weak_sess_key INTEGER NOT NULL DEFAULT 0,
     last_strong_sess_key INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(ip_id, cname_id, sname_id)
+    PRIMARY KEY (ip, cname, sname)
 );
 
 CREATE TABLE IF NOT EXISTS ccs_slice_data (
-    id INTEGER NOT NULL,
+    ip TEXT NOT NULL REFERENCES client (ip),
+    cname TEXT NOT NULL REFERENCES princ (name),
+    sname TEXT NOT NULL REFERENCES princ (name),
     starttime INTEGER NOT NULL,
     endtime INTEGER NOT NULL,
     nentries INTEGER NOT NULL,
@@ -134,26 +135,7 @@ CREATE TABLE IF NOT EXISTS ccs_slice_data (
     last_weak_sess_key_rate REAL,
     last_strong_sess_key_rate REAL
 );
-CREATE INDEX IF NOT EXISTS ccs ON ccs_slice_data(id, starttime);
-
-CREATE VIEW IF NOT EXISTS ccsv AS
-SELECT c.ip, cn.name, sn.name, ccs.last_weak_sess_key, ccs.last_strong_sess_key
-FROM client c, princ cn, princ sn, client_cname_sname ccs
-WHERE c.id = ccs.ip_id AND cn.id = ccs.cname_id AND sn.id = ccs.sname_id;
-
--- This table is used to do an INSERT OR IGNORE INTO of rows from a self-join
--- on the log tables to heuristically detect hosts to which we're forwarding
--- credentials.
-CREATE TABLE fwdtgts(
-	ip TEXT NOT NULL,
-	authtime INTEGER NOT NULL,
-	client_name TEXT NOT NULL,
-	server_name TEXT NOT NULL,
-	krbtgt_name TEXT NOT NULL,
-	log_time_diff INTEGER NOT NULL,
-	UNIQUE(ip, authtime, client_name, server_name, krbtgt_name)
-);
-
+CREATE INDEX IF NOT EXISTS ccs ON ccs_slice_data(ip, cname, sname, starttime);
 
 CREATE TABLE IF NOT EXISTS enctypes (
     enctype INTEGER PRIMARY KEY,
