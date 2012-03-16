@@ -296,6 +296,13 @@ load)
     (
         attach "$logdb"
         printf "PRAGMA synchronous = OFF;\n"
+	printf "DROP INDEX IF EXISTS log_entry_success_ip;\n"
+	printf "DROP INDEX IF EXISTS log_entry_fail_ip;\n"
+	printf "DROP INDEX IF EXISTS log_entry_success_cn;\n"
+	printf "DROP INDEX IF EXISTS log_entry_fail_cn;\n"
+	printf "DROP INDEX IF EXISTS log_entry_success_sn;\n"
+	printf "DROP INDEX IF EXISTS log_entry_success_ipcn;\n"
+	printf "DROP INDEX IF EXISTS log_entry_success_ipsn;\n"
         printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
         for file in "$@"; do
             grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries
@@ -313,7 +320,6 @@ load)
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_cn ON log_entry_success (client_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_cn ON log_entry_fail (client_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_sn ON log_entry_success (server_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_sn ON log_entry_fail (server_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipcn ON log_entry_success (ip, authtime, client_name, log_time);\n"
 	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipsn ON log_entry_success (ip, authtime, server_name, log_time);\n"
         printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
