@@ -84,7 +84,7 @@ function insert_enctypes {
 }
 
 function insert_success {
-    printf "INSERT INTO logs0.log_entry_success
+    printf "INSERT INTO log_entry_success
   (log_time, kdc, ip, req_type, req_enctypes, req_enctypes_orig,
    authtime, client_name, server_name,
    reply_enctype, ticket_enctype, session_enctype)
@@ -98,7 +98,7 @@ function insert_success {
 }
 
 function insert_failure {
-    printf "INSERT INTO logs0.log_entry_fail
+    printf "INSERT INTO log_entry_fail
   (log_time, kdc, ip, req_type,
    req_enctypes, req_enctypes_orig, code, reason, client_name, server_name)
   SELECT
@@ -271,6 +271,25 @@ function load_log_entries {
     printf "COMMIT;\n"
 }
 
+function index {
+    typeset ldb idxname tblname cols
+    ldb=$1
+    idxname=$2
+    tblname=$3
+    cols=$4
+    shift 4
+    while (($#)); do
+	cols="$cols, $cols"
+	shift
+    done
+    (
+        printf "SELECT 'Start creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
+	printf "PRAGMA synchronous = off;\n"
+	printf "CREATE INDEX IF NOT EXISTS $idxname ON $tblname ($cols);\n"
+        printf "SELECT 'Finished creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
+    ) | sqlite3 "$db"
+}
+
 OIFS=$IFS
 
 set -o noglob
@@ -288,21 +307,11 @@ init) (($# != 0)) && usage
     exit $?
     ;;
 load)
-    (($# < 1)) && usage
-    logdb=$1
-    shift
+    logdb=$db
     (($# == 0)) && set -- /dev/fd/0
     sqlite3 "$logdb" < schema_log.sql
     (
-        attach "$logdb"
         printf "PRAGMA synchronous = OFF;\n"
-	printf "DROP INDEX IF EXISTS log_entry_success_ip;\n"
-	printf "DROP INDEX IF EXISTS log_entry_fail_ip;\n"
-	printf "DROP INDEX IF EXISTS log_entry_success_cn;\n"
-	printf "DROP INDEX IF EXISTS log_entry_fail_cn;\n"
-	printf "DROP INDEX IF EXISTS log_entry_success_sn;\n"
-	printf "DROP INDEX IF EXISTS log_entry_success_ipcn;\n"
-	printf "DROP INDEX IF EXISTS log_entry_success_ipsn;\n"
         printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
         for file in "$@"; do
             grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries
@@ -311,19 +320,24 @@ load)
         insert_enctypes
         printf "COMMIT;\n"
         printf "SELECT 'Load complete at ', datetime('now', 'localtime');\n"
-    ) |  sqlite3 "$db"
-    (
-        printf "SELECT 'Starting indexing of logs at ', datetime('now', 'localtime');\n"
-	printf "PRAGMA synchronous = off;\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ip ON log_entry_success (ip, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_ip ON log_entry_fail (ip, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_cn ON log_entry_success (client_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_fail_cn ON log_entry_fail (client_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_sn ON log_entry_success (server_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipcn ON log_entry_success (ip, authtime, client_name, log_time);\n"
-	printf "CREATE INDEX IF NOT EXISTS log_entry_success_ipsn ON log_entry_success (ip, authtime, server_name, log_time);\n"
-        printf "SELECT 'Indexing complete ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$logdb"
+    ;;
+index-logs)
+    logdb=$db
+    index $db log_entry_success_ip log_entry_success ip log_time
+    index $db log_entry_success_cn log_entry_success client_name log_time
+    index $db log_entry_success_sn log_entry_success server_name log_time
+    index $db log_entry_success_ipcn log_entry_success ip authtime client_name log_time
+    index $db log_entry_success_ipsn log_entry_success ip authtime server_name log_time
+    index $db log_entry_fail_ip log_entry_fail ip log_time
+    index $db log_entry_fail_cp log_entry_fail client_name log_time
+    exit $?
+    ;;
+analyze)
+    (($# < 1)) && usage
+    logdb=$1
+    shift
+    (($# == 0)) && set -- /dev/fd/0
     (
         attach "$logdb"
         printf "SELECT 'Starting analysis at ', datetime('now', 'localtime');\n"
