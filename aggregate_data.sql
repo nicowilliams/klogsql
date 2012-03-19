@@ -9,8 +9,8 @@ INSERT OR REPLACE INTO tcsd
 (ip, starttime, endtime, nentries, is_success, nweak_as, nweak_tgs, nstrong_as,
 nstrong_tgs, nmodern_as, nmodern_tgs)
 SELECT ls.ip,
-    (min(ls.log_time) / 21600) * 21600,
-    (max(ls.log_time) / 21600) * 21600 + 21599,
+    (min(ls.log_time) / 86400) * 86400,
+    (max(ls.log_time) / 86400) * 86400 + 86399,
     count(*), 1,
     sum(CASE WHEN (NOT ls.req_type AND el.is_weak) THEN 1 ELSE 0 END),
     sum(CASE WHEN (ls.req_type AND el.is_weak) THEN 1 ELSE 0 END),
@@ -20,7 +20,9 @@ SELECT ls.ip,
     sum(CASE WHEN (ls.req_type AND NOT el.modern_client) THEN 1 ELSE 0 END)
 FROM log_entry_success ls
 JOIN req_enctypes_lists el ON ls.req_enctypes = el.enctype_list
-GROUP BY ls.ip, (ls.log_time / 21600) * 21600;
+GROUP BY ls.ip, (ls.log_time / 86400) * 86400;
+
+CREATE INDEX IF NOT EXISTS tcsdi ON tcsd(ip, starttime);
 --
 -- Merge the temp table into the main one and compute averages
 INSERT OR REPLACE INTO client_slice_data
@@ -78,7 +80,9 @@ FROM log_entry_success ls
 JOIN req_enctypes_lists el ON ls.req_enctypes = el.enctype_list
 JOIN enctypes re ON ls.reply_enctype = re.enctype
 JOIN enctypes se ON ls.session_enctype = se.enctype
-GROUP BY ls.client_name, (ls.log_time / 21600) * 21600;
+GROUP BY ls.client_name, (ls.log_time / 86400) * 86400;
+
+CREATE INDEX IF NOT EXISTS tpsdi ON tpsd(name, starttime);
 
 INSERT OR REPLACE INTO princ_slice_data
 (name, starttime, endtime, nentries, nauth, nfail, nreq_had_weak,

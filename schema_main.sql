@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS client_slice_data (
     modern_as_rate REAL,
     modern_tgs_rate REAL
 );
-CREATE INDEX IF NOT EXISTS csd ON client_slice_data(ip, starttime);
+CREATE UNIQUE INDEX IF NOT EXISTS csd ON client_slice_data(ip, starttime);
 
 CREATE TABLE IF NOT EXISTS princ (
     -- princ name, princ id, last auth, last fail, ...
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS princ_slice_data (
     ticket_strongticketkey_rate REAL,
     ticket_strong_rate REAL
 );
-CREATE INDEX IF NOT EXISTS psd ON princ_slice_data(name, starttime);
+CREATE UNIQUE INDEX IF NOT EXISTS psd ON princ_slice_data(name, starttime);
 
 CREATE TABLE IF NOT EXISTS client_cname_sname (
     ip TEXT NOT NULL REFERENCES client (ip),
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS ccs_slice_data (
     last_weak_sess_key_rate REAL,
     last_strong_sess_key_rate REAL
 );
-CREATE INDEX IF NOT EXISTS ccs ON ccs_slice_data(ip, cname, sname, starttime);
+CREATE UNIQUE INDEX IF NOT EXISTS ccs ON ccs_slice_data(ip, cname, sname, starttime);
 
 CREATE TABLE IF NOT EXISTS enctypes (
     enctype INTEGER PRIMARY KEY,

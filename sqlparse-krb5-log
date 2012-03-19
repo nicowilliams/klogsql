@@ -84,7 +84,7 @@ function insert_enctypes {
 }
 
 function insert_success {
-    printf "INSERT INTO log_entry_success
+    printf "INSERT INTO ${db_name}log_entry_success
   (log_time, kdc, ip, req_type, req_enctypes, req_enctypes_orig,
    authtime, client_name, server_name,
    reply_enctype, ticket_enctype, session_enctype)
@@ -98,7 +98,7 @@ function insert_success {
 }
 
 function insert_failure {
-    printf "INSERT INTO log_entry_fail
+    printf "INSERT INTO ${db_name}log_entry_fail
   (log_time, kdc, ip, req_type,
    req_enctypes, req_enctypes_orig, code, reason, client_name, server_name)
   SELECT
@@ -146,16 +146,38 @@ function load_log_entries {
     # of the shell for parsing these log entries, then, is fine, but it
     # is rather hacky.
     #
-    typeset src=${1:-/dev/fd/0}
+    integer progress_bar=${1:-0}
+    integer num_per_commit=${2:-100000}
     integer lineno=0
+    integer count_per_dot
     IFS=
+    ((count_per_dot = progress_bar / 80))
+    printf "PRAGMA synchronous = off;\n"
     printf "BEGIN IMMEDIATE;\n"
     while read line; do
         rawline="$line"
         ((lineno++))
-	((lineno % 25 == 0)) && printf "." 1>$tty
-        if ((lineno % 2000 == 0)); then
-	    printf "\nAt line number %d\n" $lineno 1>$tty
+	((progress_bar && lineno % count_per_dot == 0)) && printf "." 1>$tty
+        if ((lineno % progress_bar == 0)); then
+	    ((progress_bar)) && printf "\nAt line number %d\n" $lineno 1>$tty
+	    if ((incr_analysis)); then
+		insert_enctypes
+		index 0 $db log_entry_success_ip log_entry_success ip log_time
+		index 0 $db log_entry_success_cn log_entry_success client_name log_time
+		index 0 $db log_entry_success_sn log_entry_success server_name log_time
+		index 0 $db log_entry_success_ipcn log_entry_success ip authtime client_name log_time
+		index 0 $db log_entry_success_ipsn log_entry_success ip authtime server_name log_time
+		index 0 $db log_entry_fail_ip log_entry_fail ip log_time
+		index 0 $db log_entry_fail_cp log_entry_fail client_name log_time
+		((progress_bar)) && printf "SELECT 'Analyzing...';\n"
+		((progress_bar)) && printf "SELECT 'Analyzing at ', datetime('now'), '...';\n"
+		printf ".read analyze.sql\n"
+		((progress_bar)) && printf "SELECT 'Aggregating at ', datetime('now'), '...';\n"
+		printf ".read aggregate_data.sql\n"
+		((progress_bar)) && printf "SELECT 'Looping at ', datetime('now'), '...';\n"
+		printf "DELETE FROM ${db_name}log_entry_success;\n"
+		printf "DELETE FROM ${db_name}log_entry_fail;\n"
+	    fi
             printf "COMMIT;\n"
             printf "BEGIN IMMEDIATE;\n"
         fi
@@ -267,27 +289,25 @@ function load_log_entries {
         #((lineno % 80 == 0 && lineno > 0)) && printf '\n' > $tty
     #printf "\n" > $tty
 
-    done < "$src"
+    done
     printf "COMMIT;\n"
 }
 
 function index {
     typeset ldb idxname tblname cols
-    ldb=$1
-    idxname=$2
-    tblname=$3
-    cols=$4
+    integer verbose=$1
+    ldb=$2
+    idxname=$3
+    tblname=$4
+    cols=$5
     shift 4
     while (($#)); do
 	cols="$cols, $cols"
 	shift
     done
-    (
-        printf "SELECT 'Start creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
-	printf "PRAGMA synchronous = off;\n"
-	printf "CREATE INDEX IF NOT EXISTS $idxname ON $tblname ($cols);\n"
-        printf "SELECT 'Finished creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
-    ) | sqlite3 "$db"
+    ((verbose)) && printf "SELECT 'Start creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
+    printf "CREATE INDEX IF NOT EXISTS ${db_name}$idxname ON $tblname ($cols);\n"
+    ((verbose)) && printf "SELECT 'Finished creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
 }
 
 OIFS=$IFS
@@ -306,31 +326,43 @@ init) (($# != 0)) && usage
     sqlite3 "$db" < schema_main.sql
     exit $?
     ;;
+incremental)
+    logdb=$1
+    incr_analysis=1
+    db_name=logs0.
+    sqlite3 "$db" < schema_main.sql
+    sqlite3 "$logdb" < schema_log.sql
+    (
+	attach "$logdb"
+	load_log_entries 10000
+    ) < "${2:-/dev/fd/0}" | sqlite3 "$db"
+    ;;
 load)
     logdb=$db
+    incr_analysis=0
     (($# == 0)) && set -- /dev/fd/0
     sqlite3 "$logdb" < schema_log.sql
     (
         printf "PRAGMA synchronous = OFF;\n"
         printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
         for file in "$@"; do
-            grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries
+            grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries 2000
         done
-        printf "BEGIN;\n"
-        insert_enctypes
-        printf "COMMIT;\n"
         printf "SELECT 'Load complete at ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$logdb"
     ;;
 index-logs)
     logdb=$db
-    index $db log_entry_success_ip log_entry_success ip log_time
-    index $db log_entry_success_cn log_entry_success client_name log_time
-    index $db log_entry_success_sn log_entry_success server_name log_time
-    index $db log_entry_success_ipcn log_entry_success ip authtime client_name log_time
-    index $db log_entry_success_ipsn log_entry_success ip authtime server_name log_time
-    index $db log_entry_fail_ip log_entry_fail ip log_time
-    index $db log_entry_fail_cp log_entry_fail client_name log_time
+    (
+	printf "PRAGMA synchronous = off;\n"
+	index 1 $db log_entry_success_ip log_entry_success ip log_time
+	index 1 $db log_entry_success_cn log_entry_success client_name log_time
+	index 1 $db log_entry_success_sn log_entry_success server_name log_time
+	index 1 $db log_entry_success_ipcn log_entry_success ip authtime client_name log_time
+	index 1 $db log_entry_success_ipsn log_entry_success ip authtime server_name log_time
+	index 1 $db log_entry_fail_ip log_entry_fail ip log_time
+	index 1 $db log_entry_fail_cp log_entry_fail client_name log_time
+    ) | sqlite3 "$logdb"
     exit $?
     ;;
 analyze)
@@ -342,6 +374,9 @@ analyze)
         attach "$logdb"
         printf "SELECT 'Starting analysis at ', datetime('now', 'localtime');\n"
         printf "SELECT 'Analyzing loaded entries...';\n"
+        printf "BEGIN;\n"
+        insert_enctypes
+        printf "COMMIT;\n"
         printf ".read analyze.sql\n"
         printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
     ) |  sqlite3 "$db"
