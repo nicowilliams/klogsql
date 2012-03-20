@@ -6,44 +6,63 @@
 
 PROG=$0
 
-tty=/dev/tty
-tty -s && tty=/dev/tty
+PATH=$PATH:/ms/dist/fsf/PROJ/sqlite/3.6.22/bin
 
 function usage {
 cat <<EOF
-Usage: $PROG init <main-db>
-       $PROG load <main-db> <log-db> [<logfile>]
-       $PROG attach <main-db> <log-db> [<log-db ...]
+Usage:	$PROG [options] [<args>]
+	$PROG -i [-D <days>] <main-db>
+	$PROG -a -m <main-db> [-l <log-db>] [<log-db> ..]
+	$PROG -I -m <main-db> -l <log-db> [<logfile>]
+	$PROG -L -m <main-db> -l <log-db> [<logfile> ..]
+	$PROG -X -l <log-db> [<logfile>]
+	$PROG -A -l <log-db> [<logfile>]
+	$PROG -LXA -m <main-db> -l <log-db> [<logfile> ..]
 
-        $PROG reads log messages from the KDC from <logfile> or stdin then
-        updates the three named databases.
+    $PROG initializes, loads, analyzes and aggregates KDC log messages.
 
-        The three databases are attached into a single connection.  The
-        <main-db> is used for summary historical data with no more than
-        one row per-principal, one row per-client IP address and up to
-        one row per-{client IP, client principal, server principal}.
+    Options:
 
-        The <log-db> contains actual log entries.  These log entries can
-        be quite numerous, and though they are useful for many reporting
-        queries, they also consumer much storage.  Keeping log entries
-        separate makes it possible to trivially expunge them by simply
-        deleting the <log-db> files.
+	-q		Quiet
+	-s file		Copy SQL commands to <file>
+	-v		Verbose (default: on)
+	-v -v		Show SQL on /dev/tty or stderr (default: off)
+	-m main-db	Name of main database
+	-l log-db	Name of log entry database
+	-n number	Number of log entries per-transaction (default: 10000)
+	-p number	Progress bar with one line of periods every <number>
+			entries (default: 2000)
+	-D days		Number of days of aggregated log entries to keep
 
-        The init command initializes the given DBs.  The load command
-        loads log entries into a <log-db>.
+	-i		Initialize main DB (idempotent; remove DB to
+			re-initialize)
+	-a		Emit SQLite3 statements for attaching <log-db> and any
+			additional log database names listed as additional
+			arguments into a connection on <main-db>
+	-I		Incrementally load data into <log-db> and analyze and
+			aggregate incrementally (useful for consuming log
+			entries from syslog live)
+	-L		Load all entries from <logfile> or stdin into <log-db>,
+			then aggregate into main-db afterwards
+	-X		Index <log-db>
+	-A		Analyze log entries from <log-db> and update <main-db>
 
-        The attach command emits SQL suitable for attaching all the
-        given DBs into one and to present a single view unifying
-        multiple <log-db>s.
+    The <main-db> is used for summary historical data with no more than
+    one row per-principal in the 'princ' table, one row per-client IP
+    address in the 'client' table, and up to one row per-{client IP,
+    client principal, server principal} in the 'client_cname_sname' table.
+    Additional tables keep aggregated log entries.
 
+    The <log-db> contains actual log entries.  These log entries can
+    be quite numerous, and though they are useful for many reporting
+    queries, they also consume much storage.  Keeping log entries
+    separate makes it possible to trivially expunge them by simply
+    deleting the <log-db> files.
+
+    To load an entire log file use -LXA.  To incrementally load a log file
+    (e.g., from syslog, via a pipe) use -I.
 EOF
     exit 1
-}
-
-function load_schema {
-    sqlite3 "$1" < schema_main.sql
-#    sqlite3 "$1" <<EOF
-#EOF
 }
 
 # Utility functions; yes, we use global vars; sue me
@@ -138,6 +157,23 @@ function attach {
     done
 }
 
+function prune {
+    $verbose && printf "SELECT 'Pruning old aggregated entries', datetime('now');\n"
+    printf "\
+    DELETE FROM client_slice_data \
+    WHERE starttime < (SELECT o.opt * 24 * 3600
+		      FROM options o WHERE opt = 'days');\n"
+    printf "\
+    DELETE FROM princ_slice_data \
+    WHERE starttime < (SELECT o.opt * 24 * 3600
+		      FROM options o WHERE opt = 'days');\n"
+    printf "\
+    DELETE FROM ccs_slice_data \
+    WHERE starttime < (SELECT o.opt * 24 * 3600
+		      FROM options o WHERE opt = 'days');\n"
+    $verbose && printf "SELECT 'Pruned old aggregated entries', datetime('now');\n"
+}
+
 function load_log_entries {
     # This is somewhat gross.  We basically use the shell's split on
     # $IFS feature to parse kdc log entries.  Note that there are
@@ -146,10 +182,9 @@ function load_log_entries {
     # of the shell for parsing these log entries, then, is fine, but it
     # is rather hacky.
     #
-    integer progress_bar=${1:-0}
-    integer num_per_commit=${2:-100000}
     integer lineno=0
     integer count_per_dot
+    integer i
     IFS=
     ((count_per_dot = progress_bar / 80))
     printf "PRAGMA synchronous = off;\n"
@@ -162,21 +197,15 @@ function load_log_entries {
 	    ((progress_bar)) && printf "\nAt line number %d\n" $lineno 1>$tty
 	    if ((incr_analysis)); then
 		insert_enctypes
-		index 0 $db log_entry_success_ip log_entry_success ip log_time
-		index 0 $db log_entry_success_cn log_entry_success client_name log_time
-		index 0 $db log_entry_success_sn log_entry_success server_name log_time
-		index 0 $db log_entry_success_ipcn log_entry_success ip authtime client_name log_time
-		index 0 $db log_entry_success_ipsn log_entry_success ip authtime server_name log_time
-		index 0 $db log_entry_fail_ip log_entry_fail ip log_time
-		index 0 $db log_entry_fail_cp log_entry_fail client_name log_time
-		((progress_bar)) && printf "SELECT 'Analyzing...';\n"
-		((progress_bar)) && printf "SELECT 'Analyzing at ', datetime('now'), '...';\n"
+		$verbose && printf "SELECT 'Analyzing...';\n"
+		$verbose && printf "SELECT 'Analyzing at ', datetime('now'), '...';\n"
 		printf ".read analyze.sql\n"
-		((progress_bar)) && printf "SELECT 'Aggregating at ', datetime('now'), '...';\n"
+		$verbose && printf "SELECT 'Aggregating at ', datetime('now'), '...';\n"
 		printf ".read aggregate_data.sql\n"
-		((progress_bar)) && printf "SELECT 'Looping at ', datetime('now'), '...';\n"
+		$verbose && printf "SELECT 'Looping at ', datetime('now'), '...';\n"
 		printf "DELETE FROM ${db_name}log_entry_success;\n"
 		printf "DELETE FROM ${db_name}log_entry_fail;\n"
+		prune
 	    fi
             printf "COMMIT;\n"
             printf "BEGIN IMMEDIATE;\n"
@@ -263,6 +292,7 @@ function load_log_entries {
             # Finally print SQL INSERT statements; we use global
             # variables for this -- deal with it.
             IFS=$OIFS
+	    clean_values
             insert_success
         else
             # Failure log entry.
@@ -277,6 +307,7 @@ function load_log_entries {
             sprinc=${m/#* for /}
             #
             # Print the SQL INSERT statements.
+	    clean_values
             insert_failure
         fi
 
@@ -294,106 +325,162 @@ function load_log_entries {
 }
 
 function index {
-    typeset ldb idxname tblname cols
-    integer verbose=$1
-    ldb=$2
-    idxname=$3
-    tblname=$4
-    cols=$5
+    typeset idb idxname tblname cols
+    idb=$1
+    idxname=$2
+    tblname=$3
+    cols=$4
     shift 4
     while (($#)); do
 	cols="$cols, $cols"
 	shift
     done
-    ((verbose)) && printf "SELECT 'Start creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
-    printf "CREATE INDEX IF NOT EXISTS ${db_name}$idxname ON $tblname ($cols);\n"
-    ((verbose)) && printf "SELECT 'Finished creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
+    $verbose && printf "SELECT 'Start creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
+    printf "CREATE INDEX IF NOT EXISTS ${idb}$idxname ON $tblname ($cols);\n"
+    $verbose && printf "SELECT 'Finished creating log index %s ', datetime('now', 'localtime');\n" "$idxname"
+}
+
+function is_int {
+    [[ "$1" = +([0-9]) ]] && return 0
+    return 1
 }
 
 OIFS=$IFS
-
 set -o noglob
-integer i
 
-## XXX getopt-ify this ugly code so we can have various options
-(($# < 2)) && usage
-cmd=$1
-db=$2
-shift 2
-case "$cmd" in
-init) (($# != 0)) && usage
-    #load_schema "$db"
+tty=/dev/fd2
+[[ -t 0 || -t 1 || -t 2 ]] && tty=/dev/tty
+
+db=
+days=0
+logdb=
+verbose=true
+do_init=false
+do_incr=false
+do_load=false
+tee_sql=
+do_index=false
+do_attach=false
+do_analyze=false
+integer progress_bar=2000
+integer num_per_commit=10000
+while getopts ":daiILXAD:l:m:n:p:qs:v" opt "$@"; do
+    case "$opt" in
+	[?]) usage;;
+	d) set -x; typeset -ft $(typeset +f|tr -d '()');;
+	D) is_int "$OPTARG" || usage; days=$OPTARG;;
+	l) logdb=$OPTARG;;
+	m) db=$OPTARG;;
+	n) is_int "$OPTARG" || usage; num_per_commit=$OPTARG;;
+	p) is_int "$OPTARG" || usage; progress_bar=$OPTARG;;
+	q) verbose=false; progress_bar=0;;
+	v) $verbose && tee_sql="tee ${tty} |"; verbose=true;;
+	s) show_sql=true; tee_sql="tee $OPTARG |";;
+	a) do_attach=true;;
+	i) do_init=true;;
+	I) do_incr=true;;
+	L) do_load=true;;
+	X) do_index=true;;
+	A) do_analyze=true;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# Check for mutually exclusive arguments
+integer k
+k=0
+$do_attach && ((k++))
+$do_init && ((k++))
+$do_incr && ((k++))
+($do_load || $do_index || $do_analyze) && ((k++))
+((k == 1)) || usage
+
+if $do_init; then
+    [[ -n "$db" ]] || usage
     sqlite3 "$db" < schema_main.sql
+    ((days)) && printf "INSERT OR REPLACE INTO options (opt, val) VALUES ('days', %d);\n" $days | sqlite3 "$db"
     exit $?
-    ;;
-incremental)
-    logdb=$1
+elif $do_attach; then
+    [[ -n "$logdb" ]] || usage
+    attach "$logdb" "$@"
+    exit $?
+elif $do_incr; then
+    [[ -n "$db" ]] || usage
+    [[ -n "$logdb" ]] || usage
+    (($# > 1)) && usage
     incr_analysis=1
     db_name=logs0.
     sqlite3 "$db" < schema_main.sql
     sqlite3 "$logdb" < schema_log.sql
     (
 	attach "$logdb"
-	load_log_entries 10000
-    ) < "${2:-/dev/fd/0}" | sqlite3 "$db"
-    ;;
-load)
-    logdb=$db
+	((days)) && printf "INSERT OR REPLACE INTO options (opt, val) VALUES ('days', %d);\n" $days
+	index $db_name log_entry_success_ip log_entry_success ip log_time
+	index $db_name log_entry_success_cn log_entry_success client_name log_time
+	index $db_name log_entry_success_sn log_entry_success server_name log_time
+	index $db_name log_entry_success_ipcn log_entry_success ip authtime client_name log_time
+	index $db_name log_entry_success_ipsn log_entry_success ip authtime server_name log_time
+	index $db_name log_entry_fail_ip log_entry_fail ip log_time
+	index $db_name log_entry_fail_cp log_entry_fail client_name log_time
+	if (($# == 1)); then
+	    grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries 10000
+	else
+	    grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' | load_log_entries 10000
+	fi
+    ) < "${1:-/dev/fd/0}" | $tee_sql sqlite3 "$db"
+    exit $?
+fi
+
+if $do_load; then
+    [[ -n "$logdb" ]] || usage
     incr_analysis=0
     (($# == 0)) && set -- /dev/fd/0
     sqlite3 "$logdb" < schema_log.sql
     (
         printf "PRAGMA synchronous = OFF;\n"
-        printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
-        for file in "$@"; do
-            grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$1" | load_log_entries 2000
+        $verbose && printf "SELECT 'Starting load at ', datetime('now', 'localtime');\n"
+        for logfile in "$@"; do
+            grep -v 'TGS_REQ.*krbtgt/\(.*\)[@]\1' "$logfile" | load_log_entries 2000
         done
-        printf "SELECT 'Load complete at ', datetime('now', 'localtime');\n"
-    ) |  sqlite3 "$logdb"
-    ;;
-index-logs)
-    logdb=$db
+        $verbose && printf "SELECT 'Load complete at ', datetime('now', 'localtime');\n"
+    ) |  $tee_sql sqlite3 "$logdb"
+fi
+if $do_index; then
+    [[ -n "$logdb" ]] || usage
+    db_name=''
     (
 	printf "PRAGMA synchronous = off;\n"
-	index 1 $db log_entry_success_ip log_entry_success ip log_time
-	index 1 $db log_entry_success_cn log_entry_success client_name log_time
-	index 1 $db log_entry_success_sn log_entry_success server_name log_time
-	index 1 $db log_entry_success_ipcn log_entry_success ip authtime client_name log_time
-	index 1 $db log_entry_success_ipsn log_entry_success ip authtime server_name log_time
-	index 1 $db log_entry_fail_ip log_entry_fail ip log_time
-	index 1 $db log_entry_fail_cp log_entry_fail client_name log_time
-    ) | sqlite3 "$logdb"
-    exit $?
-    ;;
-analyze)
-    (($# < 1)) && usage
-    logdb=$1
-    shift
+	index "$db_name" log_entry_success_ip log_entry_success ip log_time
+	index "$db_name" log_entry_success_cn log_entry_success client_name log_time
+	index "$db_name" log_entry_success_sn log_entry_success server_name log_time
+	index "$db_name" log_entry_success_ipcn log_entry_success ip authtime client_name log_time
+	index "$db_name" log_entry_success_ipsn log_entry_success ip authtime server_name log_time
+	index "$db_name" log_entry_fail_ip log_entry_fail ip log_time
+	index "$db_name" log_entry_fail_cp log_entry_fail client_name log_time
+    ) | $tee_sql sqlite3 "$logdb"
+fi
+if $do_analyze; then
+    [[ -n "$db" ]] || usage
+    [[ -n "$logdb" ]] || usage
     (($# == 0)) && set -- /dev/fd/0
     (
         attach "$logdb"
-        printf "SELECT 'Starting analysis at ', datetime('now', 'localtime');\n"
-        printf "SELECT 'Analyzing loaded entries...';\n"
+	((days)) && printf "INSERT OR REPLACE INTO options (opt, val) VALUES ('days', %d);\n" $days
+        $verbose && printf "SELECT 'Starting analysis at ', datetime('now', 'localtime');\n"
+        $verbose && printf "SELECT 'Analyzing loaded entries...';\n"
         printf "BEGIN;\n"
         insert_enctypes
         printf "COMMIT;\n"
         printf ".read analyze.sql\n"
-        printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
-    ) |  sqlite3 "$db"
+        $verbose && printf "SELECT 'Analysis complete at ', datetime('now', 'localtime');\n"
+    ) |  $tee_sql sqlite3 "$db"
     (
         attach "$logdb"
 	printf "PRAGMA synchronous = off;\n"
-        printf "SELECT 'Starting aggregation of data for trend analysis at ', datetime('now', 'localtime');\n"
+        $verbose && printf "SELECT 'Starting aggregation of data for trend analysis at ', datetime('now', 'localtime');\n"
         printf ".read aggregate_data.sql\n"
-        printf "SELECT 'Aggregation complete at ', datetime('now', 'localtime');\n"
-    ) |  sqlite3 "$db"
-    exit $?
-    ;;
-attach)
-    (($# < 1)) && usage
-    attach "$@"
-    exit $?
-    ;;
-*) usage;;
-esac
+	prune
+        $verbose && printf "SELECT 'Aggregation complete at ', datetime('now', 'localtime');\n"
+    ) |  $tee_sql sqlite3 "$db"
+fi
 

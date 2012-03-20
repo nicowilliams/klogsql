@@ -1,5 +1,12 @@
 PRAGMA page_size = 8192;
 
+CREATE TABLE IF NOT EXISTS options (
+    opt TEXT NOT NULL PRIMARY KEY,
+    val
+);
+
+INSERT OR IGNORE INTO options (opt, val) VALUES ('days', NULL);
+
 CREATE TABLE IF NOT EXISTS client (
     -- ip addr and last time each enctype list was seen, maybe more
     -- stats
@@ -35,6 +42,7 @@ CREATE TABLE IF NOT EXISTS client_slice_data (
     modern_tgs_rate REAL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS csd ON client_slice_data(ip, starttime);
+CREATE INDEX IF NOT EXISTS csds ON client_slice_data(starttime);
 
 CREATE TABLE IF NOT EXISTS princ (
     -- princ name, princ id, last auth, last fail, ...
@@ -113,6 +121,7 @@ CREATE TABLE IF NOT EXISTS princ_slice_data (
     ticket_strong_rate REAL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS psd ON princ_slice_data(name, starttime);
+CREATE INDEX IF NOT EXISTS psds ON princ_slice_data(starttime);
 
 CREATE TABLE IF NOT EXISTS client_cname_sname (
     ip TEXT NOT NULL REFERENCES client (ip),
@@ -136,6 +145,7 @@ CREATE TABLE IF NOT EXISTS ccs_slice_data (
     last_strong_sess_key_rate REAL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ccs ON ccs_slice_data(ip, cname, sname, starttime);
+CREATE INDEX IF NOT EXISTS ccss ON ccs_slice_data(starttime);
 
 CREATE TABLE IF NOT EXISTS enctypes (
     enctype INTEGER PRIMARY KEY,
