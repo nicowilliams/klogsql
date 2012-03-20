@@ -193,7 +193,7 @@ function load_log_entries {
         rawline="$line"
         ((lineno++))
 	((progress_bar && lineno % count_per_dot == 0)) && printf "." 1>$tty
-        if ((lineno % progress_bar == 0)); then
+        if ((lineno % num_per_commit == 0)); then
 	    ((progress_bar)) && printf "\nAt line number %d\n" $lineno 1>$tty
 	    if ((incr_analysis)); then
 		insert_enctypes
